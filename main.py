@@ -1,5 +1,7 @@
-import time, os, json, re, requests, asyncio, logging
-from pyrogram import Client, filters, idle, enums
+import time, os, json, re, requests, asyncio, logging, threading
+from pyrogram.client import Client
+from pyrogram.sync import idle
+from pyrogram import filters, enums
 from redis_mock import RedisMock
 
 # Setup logging
@@ -7,37 +9,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 r = RedisMock()
-
-to_config = """
-from redis_mock import RedisMock
-r = RedisMock()
-"""
-
 token = '8564243133:AAEx8UTZKQOxtAr2jMRDkFCsjivv-aiLuiQ'
-owner_id = 8087077168
 Dev_Zaid = token.split(':')[0]
-
-# Pre-set critical data
-r.set(f'{Dev_Zaid}botowner', str(owner_id))
-r.set(f'{Dev_Zaid}:botkey', '⇜')
-r.set(f'{Dev_Zaid}botname', 'Dark')
-
-to_config += f"\ntoken = '{token}'"
-to_config += f"\nDev_Zaid = token.split(':')[0]"
-to_config += f"\nsudo_id = {owner_id}"
-try:
-    username = requests.get(f"https://api.telegram.org/bot{token}/getMe").json()["result"]["username"]
-    to_config += f"\nbotUsername = '{username}'"
-except:
-    to_config += f"\nbotUsername = 'DarkTepbot'"
-
-to_config += "\nfrom kvsqlite.sync import Client as DB"
-to_config += "\nytdb = DB('ytdb.sqlite')"
-to_config += "\nsounddb = DB('sounddb.sqlite')"
-to_config += "\nwsdb = DB('wsdb.sqlite')"
-
-with open('config.py','w+') as w:
-    w.write(to_config)
 
 app = Client(
     f'{Dev_Zaid}r3d', 
@@ -46,6 +19,36 @@ app = Client(
     bot_token=token,
     plugins={"root": "Plugins"},
 )
+
+def setup_bot_config(owner_id=8087077168):
+    """Setup bot configuration - runs in background thread"""
+    
+    to_config = """
+from redis_mock import RedisMock
+r = RedisMock()
+"""
+    
+    # Pre-set critical data
+    r.set(f'{Dev_Zaid}botowner', str(owner_id))
+    r.set(f'{Dev_Zaid}:botkey', '⇜')
+    r.set(f'{Dev_Zaid}botname', 'Dark')
+    
+    to_config += f"\ntoken = '{token}'"
+    to_config += f"\nDev_Zaid = token.split(':')[0]"
+    to_config += f"\nsudo_id = {owner_id}"
+    try:
+        username = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5).json()["result"]["username"]
+        to_config += f"\nbotUsername = '{username}'"
+    except:
+        to_config += f"\nbotUsername = 'DarkTepbot'"
+    
+    to_config += "\nfrom kvsqlite.sync import Client as DB"
+    to_config += "\nytdb = DB('ytdb.sqlite')"
+    to_config += "\nsounddb = DB('sounddb.sqlite')"
+    to_config += "\nwsdb = DB('wsdb.sqlite')"
+    
+    with open('config.py','w+') as w:
+        w.write(to_config)
 
 @app.on_message(filters.all, group=-2000)
 async def debug_all(c, m):
@@ -87,7 +90,7 @@ async def start_priv(c, m):
 async def start_bot():
     logger.info("Starting bot...")
     
-    # Start a dummy web server for Render's web service requirement
+    # Start web server FIRST - this is critical for deployment health checks
     from aiohttp import web
     async def hello(request):
         return web.Response(text="Bot is running!")
@@ -96,14 +99,26 @@ async def start_bot():
     app_web.add_routes([web.get('/', hello)])
     runner = web.AppRunner(app_web)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8000)
-    asyncio.create_task(site.start())
-    logger.info(f"Web server started on port 8000")
+    site = web.TCPSite(runner, '0.0.0.0', 3000)
+    await site.start()
+    logger.info("✓ Web server started on port 3000 and ready")
 
-    await app.start()
-    logger.info(f"Bot started as @{app.me.username}")
+    # Run config setup in background thread to avoid blocking
+    owner_id = 8087077168
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, setup_bot_config, owner_id)
+    
+    # Start bot in background (don't await) so event loop can serve web requests
+    asyncio.create_task(app.start())
+    logger.info("Bot initialization started in background...")
+    
+    # Keep the event loop alive forever to serve web requests
     await idle()
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(start_bot())
+    try:
+        asyncio.run(start_bot())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Bot crashed: {e}", exc_info=True)
