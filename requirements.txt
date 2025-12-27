@@ -66,8 +66,7 @@ shazamio==0.8.1
 shazamio_core==1.1.2
 soupsieve==2.8.1
 SpeechRecognition==3.14.4
-TgCrypto==1.2.5
-typing==3.10.0.0
+TgCrypto==1.2.3
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 uritemplate==4.2.0
