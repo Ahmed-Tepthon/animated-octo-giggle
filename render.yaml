@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: r3d-telegram-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r r3d.txt
+    startCommand: python3 main.py
+    envVars:
+      - key: PORT
+        value: 10000
